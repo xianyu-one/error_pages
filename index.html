@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- 
+      兼容性核心设计：
+      1. Caddy (v2.5+): 使用 {{placeholder "..."}} 读取变量。
+         - http.error.status_code: 错误状态码
+         - http.request.header.X-Request-ID: 读取请求头中的 ID
+      2. Nginx: 需配置 sub_filter 替换这些占位符字符串。
+      3. 本地开发: JS 会检测到大括号未被替换，自动降级使用 URL 参数。
+      
+      注意：这里使用 placeholder 函数是防止 500 崩溃的关键，绝对不能使用 .StatusCode
+    -->
+    <meta name="server-status" content='{{placeholder "http.error.status_code"}}'>
+    <meta name="request-id" content='{{placeholder "http.request.header.X-Request-ID"}}'>
+    
+    <title>Status</title>
+    <style>
+        /* CSS Variables for theming */
+        :root {
+            /* Light Mode Variables */
+            --bg-color: #ffffff;
+            --text-color: #111111;
+            --accent-color: #666666;
+            --meta-color: #888888;
+            
+            /* Glass Effect Variables */
+            --glass-overlay: rgba(255, 255, 255, 0.2);
+            --card-border: rgba(255, 255, 255, 0.2);
+            
+            --orb-color-1: rgba(0, 0, 0, 0.08);
+            --orb-color-2: rgba(0, 0, 0, 0.05);
+            
+            /* Animation Variables */
+            --transition-speed: 1.6s;
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+            
+            /* Modern Font Stack */
+            --font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Inter', "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            
+            --spacing-unit: 1.5rem;
+        }
+
+        /* Dark Mode Support (Automatic) */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #0a0a0a;
+                --text-color: #ffffff;
+                --accent-color: #a1a1a1;
+                --meta-color: #555555;
+                
+                --glass-overlay: rgba(0, 0, 0, 0.2);
+                --card-border: rgba(255, 255, 255, 0.08);
+                
+                --orb-color-1: rgba(255, 255, 255, 0.08);
+                --orb-color-2: rgba(255, 255, 255, 0.05);
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-family);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: background-color 0.8s ease, color 0.8s ease;
+            position: relative;
+        }
+
+        /* Background Orbs */
+        .background-orbs {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: -2;
+            pointer-events: none;
+        }
+
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(60px);
+            opacity: 0.8;
+            animation: float 25s infinite ease-in-out alternate;
+        }
+
+        .orb-1 {
+            width: 70vw;
+            height: 70vw;
+            background: var(--orb-color-1);
+            top: -15%;
+            left: -15%;
+            animation-duration: 35s;
+        }
+
+        .orb-2 {
+            width: 60vw;
+            height: 60vw;
+            background: var(--orb-color-2);
+            bottom: -15%;
+            right: -15%;
+            animation-duration: 45s;
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            0% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(40px, 60px) scale(1.1); }
+            100% { transform: translate(-30px, 20px) scale(0.95); }
+        }
+
+        .frosted-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            backdrop-filter: blur(80px) saturate(120%);
+            -webkit-backdrop-filter: blur(80px) saturate(120%);
+            background: var(--glass-overlay);
+            pointer-events: none;
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: calc(var(--spacing-unit) * 2);
+            text-align: center;
+            position: relative;
+            z-index: 10;
+        }
+
+        .content-wrapper {
+            padding: calc(var(--spacing-unit) * 3);
+            max-width: 900px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            animation: fadeInUp var(--transition-speed) var(--ease-out-expo) forwards;
+            opacity: 0;
+            transform: translateY(40px);
+        }
+
+        .logo-container {
+            width: 100%;
+            max-width: 480px;
+            margin-bottom: calc(var(--spacing-unit) * 3);
+            color: var(--text-color);
+        }
+
+        .custom-logo {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .error-content {
+            margin-bottom: calc(var(--spacing-unit) * 4);
+        }
+
+        .error-code {
+            font-size: 10rem;
+            font-weight: 800;
+            line-height: 1;
+            letter-spacing: -0.05em;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(180deg, var(--text-color) 20%, var(--accent-color) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            opacity: 0.95;
+            word-break: break-all; 
+        }
+
+        .error-message {
+            font-size: 1.5rem;
+            font-weight: 400;
+            line-height: 1.6;
+            color: var(--accent-color);
+            letter-spacing: 0.02em;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .action-btn {
+            display: inline-block;
+            padding: 1.25rem 3.5rem;
+            background-color: var(--text-color);
+            color: var(--bg-color);
+            text-decoration: none;
+            font-weight: 500;
+            border: 1px solid var(--text-color);
+            border-radius: 100px;
+            transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            cursor: pointer;
+            font-size: 1rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .action-btn:hover {
+            background-color: transparent;
+            color: var(--text-color);
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+
+        .action-btn:active {
+            transform: translateY(0) scale(0.98);
+        }
+
+        footer {
+            padding: var(--spacing-unit);
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--accent-color);
+            opacity: 0;
+            margin-bottom: 1.5rem;
+            animation: fadeIn 1s ease forwards;
+            animation-delay: 0.5s;
+        }
+
+        .request-id-container {
+            margin-top: 0.5rem;
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: var(--meta-color);
+            opacity: 0.7;
+        }
+
+        @keyframes fadeInUp {
+            0% { opacity: 0; transform: translateY(60px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 0.6; }
+        }
+
+        @media (max-width: 768px) {
+            .content-wrapper { padding: var(--spacing-unit); }
+            .error-code { font-size: 5rem; }
+            .logo-container { max-width: 280px; margin-bottom: 2rem; }
+            .error-message { font-size: 1.2rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="background-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+    </div>
+
+    <div class="frosted-overlay"></div>
+
+    <main>
+        <div class="content-wrapper">
+            <div class="logo-container">
+                <svg class="custom-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3600 1080" preserveAspectRatio="xMidYMid meet">
+                    <!-- 此处保留了你的原始 SVG 路径 -->
+                    <g transform="matrix(1 0 0 -1 0 1080)">
+                        <path d="M0 0c-11.499-11.282-25.298-16.763-42.186-16.763-16.861 0-30.522 5.467-41.772 16.717-11.492 11.486-17.078 25.39-17.078 42.501s5.586 31.015 17.078 42.508c11.5 11.493 25.161 17.078 41.772 17.078 16.631 0 30.431-5.605 42.186-17.124C11.71 73.431 17.4 59.54 17.4 42.455 17.4 25.371 11.71 11.486 0 0m-42.186 151.034c-34.359 0-62.674-10.362-84.141-30.791-21.32-20.285-32.132-46.457-32.132-77.788 0-31.087 10.812-57.135 32.132-77.413 21.467-20.435 49.775-30.798 84.141-30.798 34.36 0 62.668 10.363 84.142 30.798C63.279-14.68 74.088 11.368 74.088 42.455c0 31.331-10.809 57.503-32.132 77.788-21.481 20.429-49.789 30.791-84.142 30.791" fill="currentColor" transform="translate(1021.69 419.466)"/>
+                    </g>
+                    <g transform="matrix(1 0 0 -1 0 1080)">
+                        <path d="M0 0c0-13.99-4.652-24.93-14.279-33.479-9.311-8.444-21.014-12.551-35.779-12.551-24.483 0-35.404 11.598-35.404 37.606v123.962h-56.327v-133.49c0-23.932 6.795-43.125 20.199-57.056 13.957-14.495 33.585-21.848 58.338-21.848 24.325 0 45.537 7.727 63.252 23.011V-92.46h56.32v207.998H0Z" fill="currentColor" transform="translate(1260.743 450.567)"/>
+                    </g>
+                    <g transform="matrix(1 0 0 -1 0 1080)">
+                        <path d="M0 0c-19.568 0-36.955-7.727-51.891-23.018v19.351h-56.32v-207.998h56.32v105.649c0 16.237 4.462 29.017 13.641 39.071 8.51 9.363 18.622 13.917 30.923 13.917 8.72 0 16.875-1.754 24.247-5.224l7.307-3.43 13.628 51.596-4.435 2.582C24.845-2.523 13.602 0 0 0" fill="currentColor" transform="translate(1463.84 569.771)"/>
+                    </g>
+                    <g transform="matrix(1 0 0 -1 0 1080)">
+                        <path d="M1504.737 451.533h132.524v49.729h-132.524Z" fill="currentColor"/>
+                        <path d="M0 0c5.71 4.422 18.97 5.349 40.471.23l7.07-1.682 7.162 45.425-5.414 1.8c-8.851 2.938-20.817 4.37-36.568 4.37-23.274 0-41.508-5.467-54.184-16.256C-54.46 22.828-61.051 6.926-61.051-13.372v-10.494h-35.536v-44.965h35.536v-163.033h56.688v163.033h48.362v44.965H-4.363v11.591C-4.363-6.334-2.924-2.306 0 0" fill="currentColor" transform="translate(1744.572 589.97)"/>
+                        <path d="M0 0c10.363-11.026 15.396-24.74 15.396-41.923S10.481-72.701.375-83.471c-10.737-11.394-24.832-16.934-43.099-16.934-17.985 0-31.83 5.52-42.305 16.875-9.902 10.776-14.712 24.385-14.712 41.607 0 17.223 4.81 30.831 14.745 41.647 10.488 11.578 24.319 17.209 42.272 17.209C-24.713 16.933-10.737 11.394 0 0m15.028 43.631C-2.497 58.922-24.437 66.656-50.419 66.656c-30.062 0-55.709-10.533-76.23-31.311-20.245-20.514-30.516-46.509-30.516-77.439.782-30.929 11.033-56.734 30.516-76.723 19.726-20.002 45.32-30.535 76.059-31.317h.171c25.837 0 47.778 7.767 65.447 23.123v-18.727h55.958V62.26H15.028Z" fill="currentColor" transform="translate(1950.96 503.844)"/>
+                        <path d="M0 0c-28.374 0-52.456-10.579-71.729-31.468C-83.813-10.573-104.86 0-134.456 0c-23.228 0-43.329-7.438-59.947-22.151v17.755h-56.326v-207.998h56.326V-96.12c0 13.878 4.252 24.766 12.991 33.288 8.293 8.076 18.977 12.005 32.671 12.005 23.215 0 33.571-11.256 33.571-36.501v-125.066h56.688V-96.12c0 13.878 4.252 24.766 12.991 33.288 8.293 8.076 18.977 12.005 32.671 12.005 23.215 0 33.571-11.256 33.571-36.501v-125.066h56.32v134.593c0 23.656-6.531 42.587-19.417 56.274C44.17-7.241 24.773 0 0 0" fill="currentColor" transform="translate(2311.234 570.5)"/>
+                        <path d="M0 0c-8.174 0-15.317-3.003-21.244-8.93s-8.93-13.195-8.93-21.612c0-8.431 3.009-15.698 8.923-21.605C-15.323-58.074-8.174-61.084 0-61.084c8.411 0 15.685 3.01 21.612 8.937s8.93 13.194 8.93 21.605c0 8.398-3.003 15.665-8.93 21.619C15.678-3.003 8.404 0 0 0" fill="currentColor" transform="translate(2452.655 640.843)"/>
+                        <path d="M2424.676 358.106h56.326v207.998h-56.326Zm94.885 0h56.688v277.979h-56.688Z" fill="currentColor"/>
+                        <path d="m0 0-56.083 131.085h-65.507l91.337-198.221-3.975-7.957c-3.969-7.491-7.853-12.853-11.657-16.02-4.396-3.825-9.666-5.684-15.81-5.691-10.008.44-18.885 3.056-26.389 7.774l-6.604 4.153-18.655-42.489 4.895-3.094c14.963-9.443 32.317-14.233 51.589-14.233 21.087 0 38.329 5.598 51.221 16.598 11.69 9.837 21.895 25.41 31.206 47.66l86.98 211.52H51.017Z" fill="currentColor" transform="translate(2705.881 435.02)"/>
+                        <path d="M0 0c-8.897 0-16.539-3.128-22.709-9.298-6.171-6.17-9.298-13.93-9.298-23.071 0-8.91 3.127-16.552 9.291-22.709C-16.303-61.491-8.661-64.744 0-64.744c8.897 0 16.664 3.253 23.077 9.666 6.17 6.17 9.298 13.812 9.298 22.709 0 9.134-3.128 16.894-9.298 23.078C16.9-3.128 9.134 0 0 0" fill="currentColor" transform="translate(2856.383 420.656)"/><path d="M0 0c-25.174 0-46.621-7.714-63.975-22.966v18.57h-56.327v-207.998h56.327V-96.85c0 13.747 4.777 24.687 14.581 33.433 9.561 8.47 21.402 12.59 36.206 12.59 13.746 0 23.248-3.785 29.096-11.65 4.672-6.091 7.038-14.693 7.038-25.581v-124.336h56.326v133.496c0 23.938-6.932 43.152-20.613 57.102C44.466-7.333 24.727 0 0 0" fill="currentColor" transform="translate(3043.959 570.5)"/><path d="M0 0c2.306 9.048 7.478 16.677 15.652 23.15 10.363 8.154 22.657 12.117 37.606 12.117 14.101 0 26.199-3.628 35.983-10.81 8.838-6.413 14.41-14.456 16.894-24.457Zm52.529 82.794c-33.46 0-61.065-10.645-82.066-31.645-20.271-20.272-30.548-46.398-30.548-77.663 0-31.081 10.435-56.872 31.002-76.651 21.224-20.455 50.038-30.831 85.64-30.831 39.393 0 71.262 12.939 94.714 38.447l4.586 4.994-36.994 33.493-4.521-4.732c-14.686-15.369-32.993-22.84-55.952-22.84-16.973 0-31.14 4.225-42.114 12.57C6.729-64.869.999-55.597-1.117-43.868h160.838l1.209 5.211c.854 3.706 1.275 9.239 1.275 16.907 0 30.319-10.054 55.485-29.878 74.798-20.265 19.739-47.114 29.746-79.798 29.746" fill="currentColor" transform="translate(3206.124 487.706)"/><path d="m0 0-7.346-4.672c-9.601-6.111-19.602-9.206-29.728-9.206-15.179 0-21.822 6.696-22.216 22.217v95.483H6.656v44.965H-59.29v52.029h-56.688v-52.029h-35.904v-44.965h35.904V8.7c0-23.787 6.492-42.067 19.299-54.322 12.478-11.933 30.555-17.985 53.744-17.985 21.98 0 40.103 4.56 53.869 13.556l4.297 2.806Z" fill="currentColor" transform="translate(3521.769 417.317)"/><path d="M0 0c-71.946 0-141.093 30.455-189.707 83.552-10.155 11.088-9.394 28.312 1.696 38.463 11.093 10.157 28.317 9.397 38.468-1.696C-111.218 78.463-56.711 54.454 0 54.454c111.763 0 202.688 90.928 202.688 202.69 0 46.977-16.432 92.757-46.272 128.913-9.569 11.598-7.929 28.758 3.669 38.33 11.593 9.567 28.758 7.934 38.33-3.669 37.87-45.887 58.727-103.978 58.727-163.574C257.142 115.352 141.789 0 0 0" fill="currentColor" transform="translate(407.5 188.966)"/><path d="M0 0c-15.036 0-27.227 12.188-27.227 27.227 0 161.031-131.013 292.044-292.05 292.044-161.034 0-292.047-131.013-292.047-292.044C-611.324 12.188-623.515 0-638.551 0s-27.227 12.188-27.227 27.227c0 191.061 155.44 346.498 346.501 346.498 191.064 0 346.504-155.437 346.504-346.498C27.227 12.188 15.036 0 0 0" fill="currentColor" transform="translate(726.778 418.883)"/><path d="M0 0c-90.883 0-164.823 73.938-164.823 164.823 0 77.953 55.36 145.866 131.635 161.473 14.725 3.015 29.117-6.477 32.132-21.212 3.016-14.736-6.482-29.12-21.215-32.135-51.047-10.45-88.099-55.922-88.099-108.126 0-60.856 49.511-110.369 110.37-110.369 12.802 0 25.331 2.164 37.243 6.429 14.156 5.062 29.744-2.298 34.812-16.448 5.071-14.156-2.294-29.747-16.45-34.815C37.785 3.238 19.077 0 0 0" fill="currentColor" transform="translate(407.5 281.287)"/><path d="M0 0c0-34.002-27.564-61.566-61.566-61.566-34.001 0-61.565 27.564-61.565 61.566s27.564 61.566 61.565 61.566C-27.564 61.566 0 34.002 0 0" fill="currentColor" transform="translate(454.546 878.317)"/><path d="M0 0c0-22.722-18.42-41.143-41.143-41.143S-82.285-22.722-82.285 0s18.42 41.143 41.142 41.143S0 22.723 0 0" fill="currentColor" transform="translate(227.097 424.442)"/><path d="M0 0c0-29.714-24.088-53.802-53.802-53.802S-107.604-29.714-107.604 0s24.088 53.802 53.802 53.802S0 29.714 0 0" fill="currentColor" transform="translate(679.978 193.968)"/></svg>
+            </div>
+
+            <div class="error-content">
+                <h1 class="error-code" id="error-code">...</h1>
+                <p class="error-message" id="error-message">...</p>
+            </div>
+
+            <a href="#" class="action-btn" id="back-btn">...</a>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; <span id="year"></span> our-family.net. All Rights Reserved.</p>
+        <div id="request-id-display" class="request-id-container"></div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // 1. Language Definitions
+            const translations = {
+                'zh-CN': {
+                    title: '状态',
+                    backBtn: '返回上一页',
+                    loading: '检测中...',
+                    unknown: '未知状态代码',
+                    reqId: '请求 ID: ',
+                    errors: {
+                        // --- 1xx 信息响应 ---
+                        '100': 'Continue - 继续',
+                        '101': 'Switching Protocols - 切换协议',
+                        '102': 'Processing - 处理中',
+                        '103': 'Early Hints - 早期提示',
+
+                        // --- 2xx 成功响应 ---
+                        '200': 'OK - 请求成功',
+                        '201': 'Created - 已创建',
+                        '202': 'Accepted - 已接受',
+                        '203': 'Non-Authoritative Information - 非授权信息',
+                        '204': 'No Content - 无内容',
+                        '205': 'Reset Content - 重置内容',
+                        '206': 'Partial Content - 部分内容',
+                        '207': 'Multi-Status - 多状态',
+                        '208': 'Already Reported - 已报告',
+                        '226': 'IM Used - IM 占用',
+
+                        // --- 3xx 重定向消息 ---
+                        '300': 'Multiple Choice - 多种选择',
+                        '301': 'Moved Permanently - 永久移动',
+                        '302': 'Found - 临时移动',
+                        '303': 'See Other - 参见其他',
+                        '304': 'Not Modified - 未修改',
+                        '305': 'Use Proxy - 使用代理',
+                        '306': 'Unused - 未使用',
+                        '307': 'Temporary Redirect - 临时重定向',
+                        '308': 'Permanent Redirect - 永久重定向',
+
+                        // --- 4xx 客户端错误响应 ---
+                        '400': 'Bad Request - 请求参数有误',
+                        '401': 'Unauthorized - 身份未认证',
+                        '402': 'Payment Required - 需要付款',
+                        '403': 'Forbidden - 禁止访问此资源',
+                        '404': 'Page Not Found - 页面似乎不存在',
+                        '405': 'Method Not Allowed - 请求方法不被允许',
+                        '406': 'Not Acceptable - 不可接受',
+                        '407': 'Proxy Authentication Required - 需要代理授权',
+                        '408': 'Request Timeout - 请求超时',
+                        '409': 'Conflict - 请求冲突',
+                        '410': 'Gone - 资源已移除',
+                        '411': 'Length Required - 需要内容长度',
+                        '412': 'Precondition Failed - 先决条件失败',
+                        '413': 'Payload Too Large - 负载太大',
+                        '414': 'URI Too Long - URI 太长',
+                        '415': 'Unsupported Media Type - 不支持的媒体类型',
+                        '416': 'Range Not Satisfiable - 范围无法满足',
+                        '417': 'Expectation Failed - 期望失败',
+                        '418': "I'm a teapot - 我是一个茶壶",
+                        '421': 'Misdirected Request - 误导的请求',
+                        '422': 'Unprocessable Entity - 无法处理的实体',
+                        '423': 'Locked - 被锁定',
+                        '424': 'Failed Dependency - 依赖失败',
+                        '425': 'Too Early - 请求过早',
+                        '426': 'Upgrade Required - 需要升级',
+                        '428': 'Precondition Required - 要求先决条件',
+                        '429': 'Too Many Requests - 请求过于频繁',
+                        '431': 'Request Header Fields Too Large - 请求头字段太大',
+                        '451': 'Unavailable For Legal Reasons - 因法律原因不可用',
+
+                        // --- 5xx 服务端错误响应 ---
+                        '500': 'Internal Server Error - 服务器内部错误',
+                        '501': 'Not Implemented - 尚未实施',
+                        '502': 'Bad Gateway - 网关错误',
+                        '503': 'Service Unavailable - 服务暂时不可用',
+                        '504': 'Gateway Timeout - 连接超时',
+                        '505': 'HTTP Version Not Supported - 不支持的 HTTP 版本',
+                        '506': 'Variant Also Negotiates - 变体也协商',
+                        '507': 'Insufficient Storage - 存储不足',
+                        '508': 'Loop Detected - 检测到循环',
+                        '510': 'Not Extended - 未扩展',
+                        '511': 'Network Authentication Required - 需要网络身份验证'
+                    }
+                },
+                'zh-TW': {
+                    title: '狀態',
+                    backBtn: '返回上一頁',
+                    loading: '檢測中...',
+                    unknown: '未知狀態代碼',
+                    reqId: '請求 ID: ',
+                    errors: {
+                        // --- 1xx 信息響應 ---
+                        '100': 'Continue - 繼續',
+                        '101': 'Switching Protocols - 切換協定',
+                        '102': 'Processing - 處理中',
+                        '103': 'Early Hints - 早期提示',
+
+                        // --- 2xx 成功響應 ---
+                        '200': 'OK - 請求成功',
+                        '201': 'Created - 已建立',
+                        '202': 'Accepted - 已接受',
+                        '203': 'Non-Authoritative Information - 非授權資訊',
+                        '204': 'No Content - 無內容',
+                        '205': 'Reset Content - 重設內容',
+                        '206': 'Partial Content - 部分內容',
+                        '207': 'Multi-Status - 多狀態',
+                        '208': 'Already Reported - 已報告',
+                        '226': 'IM Used - IM 佔用',
+
+                        // --- 3xx 重定向消息 ---
+                        '300': 'Multiple Choice - 多種選擇',
+                        '301': 'Moved Permanently - 永久移動',
+                        '302': 'Found - 臨時移動',
+                        '303': 'See Other - 參見其他',
+                        '304': 'Not Modified - 未修改',
+                        '305': 'Use Proxy - 使用代理',
+                        '306': 'Unused - 未使用',
+                        '307': 'Temporary Redirect - 臨時重新導向',
+                        '308': 'Permanent Redirect - 永久重新導向',
+
+                        // --- 4xx 客戶端錯誤響應 ---
+                        '400': 'Bad Request - 請求參數有誤',
+                        '401': 'Unauthorized - 身份未認證',
+                        '402': 'Payment Required - 需要付款',
+                        '403': 'Forbidden - 禁止存取此資源',
+                        '404': 'Page Not Found - 頁面似乎不存在',
+                        '405': 'Method Not Allowed - 請求方法不被允許',
+                        '406': 'Not Acceptable - 不可接受',
+                        '407': 'Proxy Authentication Required - 需要代理授權',
+                        '408': 'Request Timeout - 請求超時',
+                        '409': 'Conflict - 請求衝突',
+                        '410': 'Gone - 資源已移除',
+                        '411': 'Length Required - 需要內容長度',
+                        '412': 'Precondition Failed - 先決條件失敗',
+                        '413': 'Payload Too Large - 負載太大',
+                        '414': 'URI Too Long - URI 太長',
+                        '415': 'Unsupported Media Type - 不支援的媒體類型',
+                        '416': 'Range Not Satisfiable - 範圍無法滿足',
+                        '417': 'Expectation Failed - 期望失敗',
+                        '418': "I'm a teapot - 我是一個茶壺",
+                        '421': 'Misdirected Request - 誤導的請求',
+                        '422': 'Unprocessable Entity - 無法處理的實體',
+                        '423': 'Locked - 被鎖定',
+                        '424': 'Failed Dependency - 依賴失敗',
+                        '425': 'Too Early - 請求過早',
+                        '426': 'Upgrade Required - 需要升級',
+                        '428': 'Precondition Required - 要求先決條件',
+                        '429': 'Too Many Requests - 請求過於頻繁',
+                        '431': 'Request Header Fields Too Large - 請求頭欄位太大',
+                        '451': 'Unavailable For Legal Reasons - 因法律原因不可用',
+
+                        // --- 5xx 伺服器錯誤響應 ---
+                        '500': 'Internal Server Error - 伺服器內部錯誤',
+                        '501': 'Not Implemented - 尚未實施',
+                        '502': 'Bad Gateway - 網關錯誤',
+                        '503': 'Service Unavailable - 服務暫時不可用',
+                        '504': 'Gateway Timeout - 連線超時',
+                        '505': 'HTTP Version Not Supported - 不支援的 HTTP 版本',
+                        '506': 'Variant Also Negotiates - 變體也協商',
+                        '507': 'Insufficient Storage - 儲存空間不足',
+                        '508': 'Loop Detected - 偵測到迴圈',
+                        '510': 'Not Extended - 未擴展',
+                        '511': 'Network Authentication Required - 需要網路身分驗證'
+                    }
+                },
+                'en': {
+                    title: 'Status',
+                    backBtn: 'Go Back',
+                    loading: 'Loading...',
+                    unknown: 'Unknown Status Code',
+                    reqId: 'Request ID: ',
+                    errors: {
+                        // --- 1xx Informational ---
+                        '100': 'Continue - The client should continue the request.',
+                        '101': 'Switching Protocols - The server is switching protocols.',
+                        '102': 'Processing - Server has received and is processing the request.',
+                        '103': 'Early Hints - Used to return some response headers before final message.',
+
+                        // --- 2xx Success ---
+                        '200': 'OK - The request was successful.',
+                        '201': 'Created - The resource has been created.',
+                        '202': 'Accepted - The request has been accepted for processing.',
+                        '203': 'Non-Authoritative Information - The returned meta-information is not from the origin server.',
+                        '204': 'No Content - The request was successful but has no content.',
+                        '205': 'Reset Content - The user agent should reset the document view.',
+                        '206': 'Partial Content - Partial resource delivered.',
+                        '207': 'Multi-Status - Message body follows XML message and can contain a number of separate response codes.',
+                        '208': 'Already Reported - The members of a DAV binding have already been enumerated.',
+                        '226': 'IM Used - The server has fulfilled a request for the resource.',
+
+                        // --- 3xx Redirection ---
+                        '300': 'Multiple Choice - The request has more than one possible response.',
+                        '301': 'Moved Permanently - The resource has been moved permanently.',
+                        '302': 'Found - The resource has been moved temporarily.',
+                        '303': 'See Other - The response can be found under a different URI using GET.',
+                        '304': 'Not Modified - The resource has not been modified.',
+                        '305': 'Use Proxy - The requested resource is available only through a proxy.',
+                        '306': 'Unused - This status code is no longer used.',
+                        '307': 'Temporary Redirect - Temporary redirection.',
+                        '308': 'Permanent Redirect - The resource has been moved permanently (method change not allowed).',
+
+                        // --- 4xx Client Error ---
+                        '400': 'Bad Request - The server cannot process the request.',
+                        '401': 'Unauthorized - Authentication is required.',
+                        '402': 'Payment Required - Reserved for future use.',
+                        '403': 'Forbidden - You do not have access rights.',
+                        '404': 'Page Not Found - The requested resource could not be found.',
+                        '405': 'Method Not Allowed - The request method is not supported.',
+                        '406': 'Not Acceptable - The server cannot produce a response matching the list of acceptable values.',
+                        '407': 'Proxy Authentication Required - Authentication with the proxy is required.',
+                        '408': 'Request Timeout - The server timed out waiting for the request.',
+                        '409': 'Conflict - The request could not be completed due to a conflict.',
+                        '410': 'Gone - The resource is no longer available.',
+                        '411': 'Length Required - The request did not specify the length of its content.',
+                        '412': 'Precondition Failed - The server does not meet one of the preconditions.',
+                        '413': 'Payload Too Large - The request is larger than the server is willing or able to process.',
+                        '414': 'URI Too Long - The URI provided was too long for the server to process.',
+                        '415': 'Unsupported Media Type - The request entity has a media type which the server does not support.',
+                        '416': 'Range Not Satisfiable - The portion of file requested cannot be supplied.',
+                        '417': 'Expectation Failed - The server cannot meet the requirements of the Expect header.',
+                        '418': "I'm a teapot - The server refuses to brew coffee.",
+                        '421': 'Misdirected Request - The request was directed at a server that is not able to produce a response.',
+                        '422': 'Unprocessable Entity - The request was well-formed but was unable to be followed due to semantic errors.',
+                        '423': 'Locked - The resource that is being accessed is locked.',
+                        '424': 'Failed Dependency - The request failed due to failure of a previous request.',
+                        '425': 'Too Early - The server is unwilling to risk processing a request that might be replayed.',
+                        '426': 'Upgrade Required - The client should switch to a different protocol.',
+                        '428': 'Precondition Required - The origin server requires the request to be conditional.',
+                        '429': 'Too Many Requests - You have sent too many requests.',
+                        '431': 'Request Header Fields Too Large - The server is unwilling to process the request because its header fields are too large.',
+                        '451': 'Unavailable For Legal Reasons - The user-agent requested a resource that cannot legally be provided.',
+
+                        // --- 5xx Server Error ---
+                        '500': 'Internal Server Error - An unexpected error occurred.',
+                        '501': 'Not Implemented - The server does not support the functionality.',
+                        '502': 'Bad Gateway - Invalid response from the upstream server.',
+                        '503': 'Service Unavailable - The server is currently unavailable.',
+                        '504': 'Gateway Timeout - The upstream server failed to respond in time.',
+                        '505': 'HTTP Version Not Supported - The HTTP version used in the request is not supported.',
+                        '506': 'Variant Also Negotiates - Transparent content negotiation for the request results in a circular reference.',
+                        '507': 'Insufficient Storage - The server is unable to store the representation needed to complete the request.',
+                        '508': 'Loop Detected - The server detected an infinite loop while processing the request.',
+                        '510': 'Not Extended - Further extensions to the request are required for the server to fulfill it.',
+                        '511': 'Network Authentication Required - The client needs to authenticate to gain network access.'
+                    }
+                },
+                'ja': {
+                    title: 'ステータス',
+                    backBtn: '戻る',
+                    loading: '読み込み中...',
+                    unknown: '不明なステータスコード',
+                    reqId: 'リクエスト ID: ',
+                    errors: {
+                        // --- 1xx 情報レスポンス ---
+                        '100': 'Continue - 継続',
+                        '101': 'Switching Protocols - プロトコル切り替え',
+                        '102': 'Processing - 処理中',
+                        '103': 'Early Hints - 早期ヒント',
+
+                        // --- 2xx 成功レスポンス ---
+                        '200': 'OK - リクエスト成功',
+                        '201': 'Created - 作成済み',
+                        '202': 'Accepted - 受理',
+                        '203': 'Non-Authoritative Information - 信頼できない情報',
+                        '204': 'No Content - 内容なし',
+                        '205': 'Reset Content - 内容のリセット',
+                        '206': 'Partial Content - 部分的記載',
+                        '207': 'Multi-Status - 複数のステータス',
+                        '208': 'Already Reported - 既に報告済み',
+                        '226': 'IM Used - IM 使用',
+
+                        // --- 3xx リダイレクトメッセージ ---
+                        '300': 'Multiple Choice - 複数の選択肢',
+                        '301': 'Moved Permanently - 恒久的に移動',
+                        '302': 'Found - 発見（一時的に移動）',
+                        '303': 'See Other - 他を参照',
+                        '304': 'Not Modified - 未更新',
+                        '305': 'Use Proxy - プロキシを使用',
+                        '306': 'Unused - 未使用',
+                        '307': 'Temporary Redirect - 一時的なリダイレクト',
+                        '308': 'Permanent Redirect - 恒久的なリダイレクト',
+
+                        // --- 4xx クライアントエラーレスポンス ---
+                        '400': 'Bad Request - 不正なリクエスト',
+                        '401': 'Unauthorized - 未認証',
+                        '402': 'Payment Required - 支払いが必要',
+                        '403': 'Forbidden - アクセス禁止',
+                        '404': 'Page Not Found - ページが見つかりません',
+                        '405': 'Method Not Allowed - 許可されていないメソッド',
+                        '406': 'Not Acceptable - 受理できない',
+                        '407': 'Proxy Authentication Required - プロキシ認証が必要',
+                        '408': 'Request Timeout - リクエストタイムアウト',
+                        '409': 'Conflict - 競合',
+                        '410': 'Gone - 消滅',
+                        '411': 'Length Required - 長さが必要',
+                        '412': 'Precondition Failed - 前提条件に失敗',
+                        '413': 'Payload Too Large - ペイロードが大きすぎる',
+                        '414': 'URI Too Long - URI が長すぎる',
+                        '415': 'Unsupported Media Type - サポートされていないメディアタイプ',
+                        '416': 'Range Not Satisfiable - 範囲が満たせない',
+                        '417': 'Expectation Failed - 期待する値に失敗',
+                        '418': "I'm a teapot - 私はティーポット",
+                        '421': 'Misdirected Request - 誤送信されたリクエスト',
+                        '422': 'Unprocessable Entity - 処理できないエンティティ',
+                        '423': 'Locked - ロックされています',
+                        '424': 'Failed Dependency - 依存関係の失敗',
+                        '425': 'Too Early - 早すぎる',
+                        '426': 'Upgrade Required - アップグレードが必要',
+                        '428': 'Precondition Required - 前提条件が必要',
+                        '429': 'Too Many Requests - リクエストが多すぎる',
+                        '431': 'Request Header Fields Too Large - リクエストヘッダーフィールドが大きすぎる',
+                        '451': 'Unavailable For Legal Reasons - 法的な理由により利用不可',
+
+                        // --- 5xx サーバーエラーレスポンス ---
+                        '500': 'Internal Server Error - サーバー内部エラー',
+                        '501': 'Not Implemented - 実装されていない',
+                        '502': 'Bad Gateway - 不正なゲートウェイ',
+                        '503': 'Service Unavailable - サービス利用不可',
+                        '504': 'Gateway Timeout - ゲートウェイタイムアウト',
+                        '505': 'HTTP Version Not Supported - サポートされていない HTTP バージョン',
+                        '506': 'Variant Also Negotiates - 内部構成エラー',
+                        '507': 'Insufficient Storage - 容量不足',
+                        '508': 'Loop Detected - ループを検出',
+                        '510': 'Not Extended - 拡張されていない',
+                        '511': 'Network Authentication Required - ネットワーク認証が必要'
+                    }
+                }
+            };
+
+            // 2. Language Detection
+            const userLang = navigator.language || navigator.userLanguage; 
+            let currentLang = 'en'; 
+
+            if (userLang.startsWith('zh')) {
+                currentLang = (userLang.includes('TW') || userLang.includes('HK')) ? 'zh-TW' : 'zh-CN';
+            } else if (userLang.startsWith('ja')) {
+                currentLang = 'ja';
+            }
+            const t = translations[currentLang] || translations['en'];
+
+            // 3. Logic to determine error code
+            
+            // PRIORITY 1: Check server-injected meta tag
+            const metaStatus = document.querySelector('meta[name="server-status"]').getAttribute('content');
+            const metaReqId = document.querySelector('meta[name="request-id"]').getAttribute('content');
+            
+            let code = null;
+
+            // Check if the meta tag content is a valid number (meaning it was replaced by server)
+            // Fix: Using hex code \x7b for '{' so Caddy template engine doesn't try to parse this as a template action
+            if (metaStatus && !metaStatus.includes('\x7b\x7b') && !isNaN(parseInt(metaStatus))) {
+                code = metaStatus.trim();
+            } else {
+                // PRIORITY 2: URL Parameter (Fallback)
+                const params = new URLSearchParams(window.location.search);
+                code = params.get('code');
+            }
+
+            // Default to 404 if nothing worked
+            if (!code) {
+                code = '???';
+            }
+
+            // 4. Update DOM Elements
+            let message = t.errors[code];
+            if (!message) {
+                message = `${t.unknown}`; 
+            }
+
+            document.title = `${code} - ${t.title}`;
+            document.documentElement.lang = currentLang;
+
+            const codeElement = document.getElementById('error-code');
+            const msgElement = document.getElementById('error-message');
+            const backBtn = document.getElementById('back-btn');
+            
+            codeElement.textContent = code;
+            msgElement.textContent = message;
+            backBtn.textContent = t.backBtn;
+
+            // 5. Request ID Logic
+            // Fix: Using hex code \x7b for '{' here as well
+            if (metaReqId && !metaReqId.includes('\x7b\x7b') && metaReqId.trim() !== "") {
+                const reqIdDiv = document.getElementById('request-id-display');
+                reqIdDiv.textContent = `${t.reqId}${metaReqId}`;
+                reqIdDiv.style.opacity = 1;
+            }
+
+            // 6. Back Button Logic
+            backBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (window.history.length > 1) {
+                    window.history.back();
+                } else {
+                    window.location.href = '/'; 
+                }
+            });
+
+            // 7. Copyright Year
+            document.getElementById('year').textContent = new Date().getFullYear();
+        });
+    </script>
+</body>
+</html>
+
